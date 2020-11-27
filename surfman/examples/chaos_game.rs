@@ -6,8 +6,9 @@ use euclid::default::Point2D;
 use rand::{self, Rng};
 use surfman::{SurfaceAccess, SurfaceType};
 use winit::dpi::PhysicalSize;
-use winit::{DeviceEvent, Event, EventsLoop, KeyboardInput, VirtualKeyCode};
-use winit::{WindowBuilder, WindowEvent};
+use winit::event::{DeviceEvent, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{EventLoop, ControlFlow};
+use winit::window::WindowBuilder;
 
 #[cfg(target_os = "macos")]
 use surfman::SystemConnection;
@@ -38,15 +39,15 @@ fn main() {
     let adapter = connection.create_adapter().unwrap();
     let mut device = connection.create_device(&adapter).unwrap();
 
-    let mut event_loop = EventsLoop::new();
-    let dpi = event_loop.get_primary_monitor().get_hidpi_factor();
+    let mut event_loop = EventLoop::new();
+    let scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
     let logical_size =
-        PhysicalSize::new(WINDOW_WIDTH as f64, WINDOW_HEIGHT as f64).to_logical(dpi);
+        PhysicalSize::new(WINDOW_WIDTH as f64, WINDOW_HEIGHT as f64).to_logical(scale_factor);
     let window = WindowBuilder::new().with_title("Chaos game example")
-                                     .with_dimensions(logical_size)
+                                     .with_inner_size(logical_size)
                                      .build(&event_loop)
                                      .unwrap();
-    window.show();
+    window.set_visible(true);
 
     let native_widget = connection.create_native_widget_from_winit_window(&window).unwrap();
 
@@ -57,31 +58,28 @@ fn main() {
     let mut point = Point2D::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5);
     let mut data = vec![0; WINDOW_WIDTH as usize * WINDOW_HEIGHT as usize * 4];
 
-    let mut exit = false;
-    while !exit {
-        for _ in 0..ITERATIONS_PER_FRAME {
-            let (dest_x, dest_y) = TRIANGLE_POINTS[rng.gen_range(0, 3)];
-            point = point.lerp(Point2D::new(dest_x, dest_y), 0.5);
-            put_pixel(&mut data, &point, FOREGROUND_COLOR);
-        }
-
-        device.lock_surface_data(&mut surface).unwrap().data().copy_from_slice(&data);
-        device.present_surface(&mut surface).unwrap();
-
-        event_loop.poll_events(|event| {
-            match event {
-                Event::WindowEvent { event: WindowEvent::Destroyed, .. } |
-                Event::DeviceEvent {
-                    event: DeviceEvent::Key(KeyboardInput {
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
-                        ..
-                    }),
+    event_loop.run(move |event, _, control_flow| {
+        match event {
+            Event::MainEventsCleared => {
+                for _ in 0..ITERATIONS_PER_FRAME {
+                    let (dest_x, dest_y) = TRIANGLE_POINTS[rng.gen_range(0, 3)];
+                    point = point.lerp(Point2D::new(dest_x, dest_y), 0.5);
+                    put_pixel(&mut data, &point, FOREGROUND_COLOR);
+                }
+                device.lock_surface_data(&mut surface).unwrap().data().copy_from_slice(&data);
+                device.present_surface(&mut surface).unwrap();
+            },
+            Event::WindowEvent { event: WindowEvent::Destroyed, .. } |
+            Event::DeviceEvent {
+                event: DeviceEvent::Key(KeyboardInput {
+                    virtual_keycode: Some(VirtualKeyCode::Escape),
                     ..
-                } => exit = true,
-                _ => {}
-            }
-        });
-    }
+                }),
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            _ => {}
+        }
+    });
 }
 
 fn put_pixel(data: &mut [u8], point: &Point2D<f32>, color: u32) {

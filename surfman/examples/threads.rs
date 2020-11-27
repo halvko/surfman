@@ -17,11 +17,13 @@ use self::common::FilesystemResourceLoader;
 #[cfg(not(target_os = "android"))]
 use surfman::{ContextAttributeFlags, ContextAttributes, GLVersion};
 #[cfg(not(target_os = "android"))]
-use winit::dpi::PhysicalSize;
+use winit::event::{DeviceEvent, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 #[cfg(not(target_os = "android"))]
-use winit::{DeviceEvent, Event, EventsLoop, KeyboardInput, VirtualKeyCode};
+use winit::event_loop::EventLoop;
 #[cfg(not(target_os = "android"))]
-use winit::{WindowBuilder, WindowEvent};
+use winit::window::WindowBuilder;
+#[cfg(not(target_os = "android"))]
+use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
 
 pub mod common;
 
@@ -84,16 +86,16 @@ static BACKGROUND_COLOR: [f32; 4] = [
 
 #[cfg(not(target_os = "android"))]
 fn main() {
-    let mut event_loop = EventsLoop::new();
-    let dpi = event_loop.get_primary_monitor().get_hidpi_factor();
+    let event_loop = EventLoop::new();
+    let scale_factor = event_loop.primary_monitor().unwrap().scale_factor();
     let window_size = Size2D::new(WINDOW_WIDTH, WINDOW_HEIGHT);
     let logical_size =
-        PhysicalSize::new(window_size.width as f64, window_size.height as f64).to_logical(dpi);
+        PhysicalSize::new(window_size.width, window_size.height).to_logical::<f64>(scale_factor);
     let window = WindowBuilder::new().with_title("Multithreaded example")
-                                     .with_dimensions(logical_size)
-                                     .build(&event_loop)
-                                     .unwrap();
-    window.show();
+                                            .with_inner_size(logical_size)
+                                            .build(&event_loop)
+                                            .unwrap();
+    window.set_visible(true);
 
     let connection = Connection::from_winit_window(&window).unwrap();
     let native_widget = connection.create_native_widget_from_winit_window(&window).unwrap();
@@ -113,30 +115,26 @@ fn main() {
     device.make_context_current(&context).unwrap();
 
     let mut app = App::new(connection,
-                           adapter,
-                           device,
-                           context,
-                           Box::new(FilesystemResourceLoader),
-                           window_size);
-    let mut exit = false;
+        adapter,
+        device,
+        context,
+        Box::new(FilesystemResourceLoader),
+        window_size);
 
-    while !exit {
-        app.tick(true);
-
-        event_loop.poll_events(|event| {
-            match event {
-                Event::WindowEvent { event: WindowEvent::Destroyed, .. } |
-                Event::DeviceEvent {
-                    event: DeviceEvent::Key(KeyboardInput {
+    event_loop.run(move |event, _, control_flow| {
+        match event {
+            Event::WindowEvent { event: WindowEvent::Destroyed, .. } |
+            Event::DeviceEvent {
+                event: DeviceEvent::Key(KeyboardInput {
                         virtual_keycode: Some(VirtualKeyCode::Escape),
                         ..
                     }),
-                    ..
-                } => exit = true,
-                _ => {}
-            }
-        });
-    }
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::RedrawEventsCleared => app.tick(true),
+            _ => {}
+        }
+    });
 }
 
 pub struct App {
